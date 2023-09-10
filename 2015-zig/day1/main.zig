@@ -11,7 +11,6 @@ pub fn readFile(alok: std.mem.Allocator) ![]u8 {
     const file = try fs.cwd().openFile("entry.txt", .{}); //open a file
     defer file.close(); //close the file at end of the scope
 
-
     //getting the size of the file to alloc a buffer for it
     const file_size = (try file.stat()).size;
     return try file.readToEndAlloc(alok, file_size);
