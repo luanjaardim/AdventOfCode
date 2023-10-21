@@ -1,0 +1,6 @@
+1 -> a
+3 -> b
+a OR b -> a
+a OR 4 -> a
+a LSHIFT 1 -> a
+a RSHIFT 2 -> a
