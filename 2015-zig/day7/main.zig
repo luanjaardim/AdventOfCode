@@ -1,84 +1,155 @@
 const std = @import("std");
+const print = std.debug.print;
 const mem = std.mem;
 const file = @embedFile("entry.txt");
+
+const Operand = struct {
+    isVal : bool,
+    val : u16,
+};
+
+const OpsType = enum(u3) {
+    Not, And, Or, Lshift, Rshift, JustStore, None
+};
+
+const Operation = struct {
+    typeOp: OpsType,
+    op1: Operand,
+    op2: Operand,
+    done: bool = false,
+    val: u16,
+};
 
 fn getPos(name: []const u8) u16 {
     if(name.len == 1) return 676 + @as(u16, @intCast(name[0] - 'a'))
     else return @as(u16, @intCast(name[0] - 'a')) + 26*@as(u16, @intCast(name[1] - 'a'));
 }
 
-pub fn main() !void {
+fn calculateValue(map : []Operation, pos: u16) u16 {
 
-    //plus 26 for just one chars
-    var map: [26*26+26]u16 = undefined;
-    @memset(map[0..], 0);
-
-    var split = mem.tokenizeScalar(u8, file, '\n');
-    var words: @TypeOf(split) = undefined;
-
-    // const operations = ;
-    const Ops = enum(u3) {
-        And, Or, Not, Lshift, Rshift, JustStore
-    };
-
-    var currValues: [2]u16 = [_]u16{ 0, 0 };
-    var currIndex: usize = undefined;
-    var currOp: Ops = undefined;
-    var currDest: u16 = undefined;
-
-    while(split.next()) |line| {
-        words = mem.tokenizeScalar(u8, line, ' ');
-        @memset(currValues[0..], 0);
-        currIndex = 0;
-        currOp = .JustStore;
-
-        words_for__ : while(words.next()) |word| {
-            if(mem.eql(u8, "->", word)) {
-                currDest = getPos((words.next() orelse continue)[0..]);
-                break;
-            }
-            inline for([_][]const u8 {"AND", "OR", "NOT", "LSHIFT", "RSHIFT"}, 0..) |str, i| {
-                if(mem.eql(u8, str[0..], word[0..])) {
-                    currOp = @enumFromInt(i);
-                    continue : words_for__;
-                }
-            }
-            currValues[currIndex] = std.fmt.parseInt(u16, word, 10) catch parse_error__ : {
-                break : parse_error__ map[getPos(word)];
-            };
-            currIndex += 1;
-        }
-        // std.debug.print("{any}\n", .{currValues});
-        // std.debug.print("{any}\n", .{currOp});
-        // std.debug.print("{any}\n", .{currDest});
-
-        switch (currOp) {
+    if(map[pos].done) {
+        return map[pos].val;
+    }
+    else {
+        switch(map[pos].typeOp) {
             .And => {
-                map[currDest] = (currValues[0] & currValues[1]);
+                map[pos].val = (if(map[pos].op1.isVal) map[pos].op1.val else calculateValue(map, map[pos].op1.val)) &
+                               (if(map[pos].op2.isVal) map[pos].op2.val else calculateValue(map, map[pos].op2.val));
             },
             .Or => {
-                // std.debug.print("{}\n", .{(currValues[0] | currValues[1])});
-                map[currDest] = (currValues[0] | currValues[1]);
+                map[pos].val = (if(map[pos].op1.isVal) map[pos].op1.val else calculateValue(map, map[pos].op1.val)) |
+                               (if(map[pos].op2.isVal) map[pos].op2.val else calculateValue(map, map[pos].op2.val));
             },
             .Not => {
-                map[currDest] = (~currValues[0]);
+                map[pos].val = if(map[pos].op1.isVal) (~map[pos].op1.val) else (~calculateValue(map, map[pos].op1.val));
             },
             .Lshift => {
-                map[currDest] = (currValues[0] << @intCast(currValues[1]));
+                map[pos].val = (if(map[pos].op1.isVal) map[pos].op1.val else calculateValue(map, map[pos].op1.val)) <<
+                               @intCast(if(map[pos].op2.isVal) map[pos].op2.val else calculateValue(map, map[pos].op2.val));
             },
             .Rshift => {
-                map[currDest] = (currValues[0] >> @intCast(currValues[1]));
+                map[pos].val = (if(map[pos].op1.isVal) map[pos].op1.val else calculateValue(map, map[pos].op1.val)) >>
+                               @intCast(if(map[pos].op2.isVal) map[pos].op2.val else calculateValue(map, map[pos].op2.val));
             },
             .JustStore => {
-                map[currDest] = currValues[0];
+                map[pos].val = if(map[pos].op1.isVal) map[pos].op1.val else calculateValue(map, map[pos].op1.val);
+            },
+            else => {
+                print("error: invalid operation type", .{});
+                std.os.exit(1);
             }
         }
+        map[pos].done = true;
+        return map[pos].val;
     }
-    std.debug.print("{}\n", .{map[getPos("a")]});
+}
+
+fn assemblyCircuit(map : []Operation, iter : mem.TokenIterator(u8, .scalar)) void {
+    var inner_iter = iter;
+    while(inner_iter.next()) |line| {
+        var words = mem.tokenizeScalar(u8, line, ' ');
+
+        var op : Operation = Operation{
+            .typeOp = .None,
+            .op1 = Operand{ .isVal = true, .val = 0},
+            .op2 = Operand{ .isVal = true, .val = 0},
+            .done = false,
+            .val = 0,
+        };
+
+        word_for__ : while(words.next()) |word| {
+            if(mem.eql(u8, "->", word)) {
+                if(op.typeOp == .None) {
+                    op.typeOp = .JustStore;
+                }
+                break : word_for__ ; //if the type was empty it will be a store operation
+            }
+
+            inline for ([_][]const u8{"NOT", "AND", "OR", "LSHIFT", "RSHIFT"}, 0..) |operation, ind| {
+                if(mem.eql(u8, operation, word)) {
+                    op.typeOp = @enumFromInt(ind);
+                    continue : word_for__; //type of the operation found
+                }
+            }
+
+            if((op.typeOp == .None) or (op.typeOp == .Not)) {
+                //get the value as a number or as a position to a operation in map
+                op.op1.val = std.fmt.parseInt(u16, word, 10) catch parse_err__ : {
+                    op.op1.isVal = false;
+                    break : parse_err__ getPos(word); //break catch block returning a value
+                };
+            } else {
+                //get the value as a number or as a position to a operation in map
+                op.op2.val = std.fmt.parseInt(u16, word, 10) catch parse_err__ :{
+                    op.op2.isVal = false;
+                    break : parse_err__ getPos(word); //break catch block returning a value
+                };
+            }
+        }
+        const word = words.next() orelse {
+            print("error: line without a destination operand", .{});
+            std.os.exit(1);
+        };
+        map[getPos(word)] = op;
+    }
+}
+
+pub fn main() !void {
+
+    // this map will store every operation that must be used for calculate
+    // some wire, and the value of the operation it it was already calculated
+    var map: [26*26+26]Operation =
+        [_]Operation{Operation{
+            .typeOp = .None,
+            .op1 = Operand{ .isVal = true, .val = 0},
+            .op2 = Operand{ .isVal = true, .val = 0},
+            .done = false,
+            .val = 0}
+        } ** 702; //fills the array with the same value
+    map[0].done = true;
+
+
+    //this will iterate over the file lines
+    const iter = mem.tokenizeScalar(u8, file, '\n');
+    assemblyCircuit(&map, iter);
+    print("First problem solution: {}\n", .{calculateValue(&map, getPos("a"))});
+
+    const backupA = map[getPos("a")]; //backup the value of 'a' to override the signal of 'b'
+    //clean the map to the solve the second problem
+    @memset(&map, Operation{
+            .typeOp = .None,
+            .op1 = Operand{ .isVal = true, .val = 0},
+            .op2 = Operand{ .isVal = true, .val = 0},
+            .done = false,
+            .val = 0
+    });
+    assemblyCircuit(&map, iter);
+    map[getPos("b")] = backupA;
+    print("Second problem solution: {}\n", .{calculateValue(&map, getPos("a"))});
 }
 
 test "array of strings" {
 
     const oi: []const u8 = "sla";
-    std.debug.print("{s}\n", .{@typeName(@TypeOf(oi))});
+    print("{s}\n", .{@typeName(@TypeOf(oi))});
 }
